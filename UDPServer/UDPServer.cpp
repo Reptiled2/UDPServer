@@ -1,123 +1,160 @@
-#include <winsock2.h>
-#include <ws2tcpip.h>
 #include <iostream>
 #include <functional>
 #include <vector>
+#include <memory>
+#include <boost/asio.hpp>
+#include <boost/array.hpp>
+#include "Packet.h"
+#include "Peer.h"
+#include "TokenGenerator.h"
+#include "Buffer.h"
 
-#pragma comment(lib, "ws2_32.lib")
-
-struct Peer {
-    int id;
-    in_addr ip;
-};
-
-enum {
-    CONNECT = 1,
-    DISCONNECT = 2,
-    MESSAGE = 3,
-    KEEPALIVE = 4,
-    ALREADY_CONNECTED = 5
-};
 
 class UDPServer {
 private:
-    SOCKET p_serverSocket;
-    std::vector<std::pair<int, sockaddr_in>> peers;
-    int peerCount;
+    std::unique_ptr<boost::asio::ip::udp::socket> p_serverSocket;
+    boost::asio::io_context p_iocontext;
+    std::vector<Peer> p_peers;
+    int p_peerCount;
 
 private:
-    void send(const sockaddr_in &client, const char* buffer[2048]) {
-        if (sendto(p_serverSocket, *buffer, sizeof(buffer), 0, (SOCKADDR*)&client, sizeof(client)) == SOCKET_ERROR) {
-            std::cout << "Error ocurred while sending message!\n" << WSAGetLastError();
+    void send(std::vector<char> buffer, boost::asio::ip::udp::endpoint remoteInfo) {
+        boost::system::error_code err;
+        p_serverSocket->send_to(boost::asio::buffer(buffer), remoteInfo, 0, err);
+
+        if (err) {
+            std::cout << "Error ocurred while sending message: " << err.message() << "\n";
+        }
+    };
+
+    void handleMessage(std::shared_ptr<boost::array<char, 2048>> receivedBuffer, std::shared_ptr<boost::asio::ip::udp::endpoint> remoteInfo) {
+        std::cout << "Message received: " << receivedBuffer->data() << "\n";
+        switch (atoi(&receivedBuffer->data()[0])) {
+        case PacketTypes::CONNECT: {
+            bool found = false;
+
+            for (const Peer& peer : p_peers) {
+                if (peer.socket.address().to_string() != remoteInfo->address().to_string() && peer.socket.port() != remoteInfo->port()) {
+                    continue;
+                };
+
+                found = true;
+                break;
+            };
+
+            if (found) {
+                break;
+            };
+
+            Peer newPeer;
+            newPeer.peerId = p_peerCount;
+            newPeer.socket = *remoteInfo;
+            newPeer.sessionToken = tokenGenerator(p_peers);
+
+            Packet packet;
+            packet.type = PacketTypes::CONNECT;
+            packet.peerId = { newPeer.peerId };
+            
+            BufferVector buffer;
+            buffer.peerId(newPeer.peerId);
+            buffer.addElement(newPeer.sessionToken);
+            
+
+            p_peers.push_back(newPeer);
+            p_peerCount++;
+            break;
+        }
+
+        case PacketTypes::DISCONNECT: {
+            std::cout << "To be added\n";
+            break;
+        }
+
+        case PacketTypes::MESSAGE: {
+            break;
+        }
+
+        default: {
+            std::cout << "Couldnt read message\n";
+            break;
+        }
         };
-        return;
-    }
+    };
+
+    void receiveMessage() {
+        auto receivedBuffer = std::make_shared<boost::array<char, 2048>>();
+        auto remoteInfo = std::make_shared<boost::asio::ip::udp::endpoint>();
+
+        p_serverSocket->async_receive_from(
+            boost::asio::buffer(*receivedBuffer),
+            *remoteInfo,
+            [this, receivedBuffer, remoteInfo](const boost::system::error_code &err, size_t bytes) {
+                if (err) {
+                    std::cout << "Error ocurred while receiving data: " << err.message() << "\n";
+                    return;
+                };
+
+
+                handleMessage(receivedBuffer, remoteInfo);
+                receiveMessage();
+            }
+        );
+    };
 
 public:
-    UDPServer(const int& PORT) {
-        WSAData data;
-        if (WSAStartup(MAKEWORD(2, 2), &data) != 0) {
-            std::cout << "Error ocurred while loading winsock!\n";
-            exit(-1);
-        };
+    UDPServer(const int& PORT)
+        : p_peerCount(0)
+    {
+        p_serverSocket = std::make_unique<boost::asio::ip::udp::socket>(p_iocontext);
 
-        p_serverSocket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+        p_serverSocket->open(boost::asio::ip::udp::v4());
+        p_serverSocket->bind(boost::asio::ip::udp::endpoint(
+            boost::asio::ip::address::from_string("127.0.0.1"),
+            PORT)
+        );
 
-        sockaddr_in serverProperties;
-        serverProperties.sin_family = AF_INET;
-        serverProperties.sin_port = htons(PORT);
-        serverProperties.sin_addr.s_addr = htonl(INADDR_ANY);
-        inet_pton(AF_INET, "127.0.0.1", &serverProperties.sin_addr);
-
-        if (bind(p_serverSocket, (SOCKADDR*)&serverProperties, sizeof(serverProperties)) == SOCKET_ERROR) {
-            std::cout << "Error ocurred while binding the socket!\n";
-            exit(-1);
-        };
+        receiveMessage();
     };
 
     ~UDPServer() {
-        closesocket(p_serverSocket);
+        p_iocontext.stop();
+        p_serverSocket->close();
     };
 
-    void start(const std::function<void(int, char[2048])> &callback) {
-        std::cout << "Server started\n";
+    void start() {
+        std::cout << "Server started!\n";
+        p_iocontext.run();
+    };
 
-        while (true) {
-            sockaddr_in clientAddr;
-            int clientAddrLen = sizeof(clientAddr);
-            char buffer[2048];
+    void sendMessage(Packet packet) {
+        if (sizeof(packet.buffer) > 2040) {
+            std::cout << "Buffer size limit exceeded!\n";
+            return;
+        }
+        
+        std::vector<char> packetBuffer = packet.buffer.getBuffer();
+        std::vector<char> buffer;
+        buffer.reserve(2048);
+        buffer.push_back(static_cast<char>(packet.type));
+        buffer.push_back('\0');
+        buffer.insert(buffer.end(), packetBuffer.begin(), packetBuffer.end());
 
-            int bytes = recvfrom(p_serverSocket, buffer, sizeof(buffer), 0, (SOCKADDR*)&clientAddr, &clientAddrLen);
-            if (bytes == SOCKET_ERROR) {
-                std::cout << "Error ocurred while reading data!\n";
-                continue;
-            };
-
-            std::cout << "Received: " << buffer << "\n";
-            switch (buffer[0]) {
-            case CONNECT:
-                const char* buffer[2048];
-                for (std::pair<int, sockaddr_in> peer : peers) {
-                    std::cout << peer.first;
-                    if (peer.second.sin_addr.s_addr == clientAddr.sin_addr.s_addr && peer.second.sin_port == clientAddr.sin_port) {
-                        const char* buffer[2048];
-
-                        memset(buffer, 5, 1);
-                        send(clientAddr, buffer);
-                        std::cout << "sent message\n";
-                        return;
-                    };
+        for (int i : packet.peerId) {
+            for (Peer &peer : p_peers) {
+                if (peer.peerId != i) {
+                    continue;
                 };
 
-                peers.push_back(std::pair(peerCount, clientAddr));
-                peerCount++;
-                memset(buffer, 1, 1);
-                send(clientAddr, buffer);
-                break;
-
-            case DISCONNECT:
-                break;
-
-            default:
-                std::cout << "Couldnt read message\n";
+                send(buffer, peer.socket);
                 break;
             }
-
         };
-    };
-
-    void sendMessage(int peerId, const char buffer[2046]) {
-        
     };
 };
 
 int main()
 {
     UDPServer server(12345);
-
-    server.start([](int byte, char data[2048]) {
-        std::cout << "Message received: " << data << "\n";
-    });
-
+    server.start();
     return 0;
 };
