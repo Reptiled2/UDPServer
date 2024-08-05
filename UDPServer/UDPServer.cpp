@@ -9,25 +9,30 @@
 #include "TokenGenerator.h"
 #include "Buffer.h"
 
+using boost::asio::ip::udp;
 
 class UDPServer {
 private:
-    std::unique_ptr<boost::asio::ip::udp::socket> p_serverSocket;
+    std::unique_ptr<udp::socket> p_serverSocket;
     boost::asio::io_context p_iocontext;
     std::vector<Peer> p_peers;
     int p_peerCount;
 
 private:
-    void send(std::vector<char> buffer, boost::asio::ip::udp::endpoint remoteInfo) {
-        boost::system::error_code err;
-        p_serverSocket->send_to(boost::asio::buffer(buffer), remoteInfo, 0, err);
-
-        if (err) {
-            std::cout << "Error ocurred while sending message: " << err.message() << "\n";
-        }
+    void send(std::shared_ptr<std::vector<char>> buffer, udp::endpoint remoteInfo) {
+        p_serverSocket->async_send_to(
+            boost::asio::buffer(*buffer), 
+            remoteInfo, 
+            0, 
+            [buffer](const boost::system::error_code &err, const std::size_t &bytes) {
+                if (err) {
+                    std::cout << "Error ocurred while sending message: " << err.message() << " " << err.what() << "\n";
+                };
+            }
+        );
     };
 
-    void handleMessage(std::shared_ptr<boost::array<char, 2048>> receivedBuffer, std::shared_ptr<boost::asio::ip::udp::endpoint> remoteInfo) {
+    void handleMessage(std::shared_ptr<boost::array<char, 2048>> receivedBuffer, std::shared_ptr<udp::endpoint> remoteInfo) {
         std::cout << "Message received: " << receivedBuffer->data() << "\n";
         switch (atoi(&receivedBuffer->data()[0])) {
         case PacketTypes::CONNECT: {
@@ -58,10 +63,13 @@ private:
             BufferVector buffer;
             buffer.peerId(newPeer.peerId);
             buffer.addElement(newPeer.sessionToken);
-            
+
+            packet.buffer = buffer;
 
             p_peers.push_back(newPeer);
             p_peerCount++;
+
+            sendMessage(packet);
             break;
         }
 
@@ -83,7 +91,7 @@ private:
 
     void receiveMessage() {
         auto receivedBuffer = std::make_shared<boost::array<char, 2048>>();
-        auto remoteInfo = std::make_shared<boost::asio::ip::udp::endpoint>();
+        auto remoteInfo = std::make_shared<udp::endpoint>();
 
         p_serverSocket->async_receive_from(
             boost::asio::buffer(*receivedBuffer),
@@ -102,13 +110,13 @@ private:
     };
 
 public:
-    UDPServer(const int& PORT)
+    UDPServer(const int &PORT)
         : p_peerCount(0)
     {
-        p_serverSocket = std::make_unique<boost::asio::ip::udp::socket>(p_iocontext);
+        p_serverSocket = std::make_unique<udp::socket>(p_iocontext);
 
-        p_serverSocket->open(boost::asio::ip::udp::v4());
-        p_serverSocket->bind(boost::asio::ip::udp::endpoint(
+        p_serverSocket->open(udp::v4());
+        p_serverSocket->bind(udp::endpoint(
             boost::asio::ip::address::from_string("127.0.0.1"),
             PORT)
         );
@@ -133,11 +141,11 @@ public:
         }
         
         std::vector<char> packetBuffer = packet.buffer.getBuffer();
-        std::vector<char> buffer;
-        buffer.reserve(2048);
-        buffer.push_back(static_cast<char>(packet.type));
-        buffer.push_back('\0');
-        buffer.insert(buffer.end(), packetBuffer.begin(), packetBuffer.end());
+        std::shared_ptr<std::vector<char>> buffer = std::make_shared<std::vector<char>>();
+        buffer->reserve(2048);
+        buffer->push_back(static_cast<char>(packet.type));
+        buffer->push_back('\0');
+        buffer->insert(buffer->end(), packetBuffer.begin(), packetBuffer.end());
 
         for (int i : packet.peerId) {
             for (Peer &peer : p_peers) {
