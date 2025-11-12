@@ -1,26 +1,20 @@
-#include <iostream>
 #include <functional>
-#include <vector>
-#include <memory>
-#include <boost/asio.hpp>
-#include <boost/array.hpp>
-#include "Packet.h"
-#include "Peer.h"
-#include "TokenGenerator.h"
-#include "Buffer.h"
+#include "pch.h"
+#include "token_generator.h"
+#include <iostream>
 
 using boost::asio::ip::udp;
 
 class UDPServer {
 private:
-    std::unique_ptr<udp::socket> p_serverSocket;
+    udp::socket p_serverSocket;
     boost::asio::io_context p_iocontext;
-    std::vector<Peer> p_peers;
+    std::unique_ptr<std::vector<Peer>> p_peers;
     int p_peerCount;
 
 private:
     void send(std::shared_ptr<std::vector<char>> buffer, udp::endpoint remoteInfo) {
-        p_serverSocket->async_send_to(
+        p_serverSocket.async_send_to(
             boost::asio::buffer(*buffer), 
             remoteInfo, 
             0, 
@@ -38,7 +32,7 @@ private:
         case PacketTypes::CONNECT: {
             bool found = false;
 
-            for (const Peer& peer : p_peers) {
+            for (const Peer &peer : *p_peers) {
                 if (peer.socket.address().to_string() != remoteInfo->address().to_string() && peer.socket.port() != remoteInfo->port()) {
                     continue;
                 };
@@ -54,19 +48,19 @@ private:
             Peer newPeer;
             newPeer.peerId = p_peerCount;
             newPeer.socket = *remoteInfo;
-            newPeer.sessionToken = tokenGenerator(p_peers);
+            newPeer.sessionToken = generateToken(p_peers);
 
             Packet packet;
             packet.type = PacketTypes::CONNECT;
             packet.peerId = { newPeer.peerId };
             
             BufferVector buffer;
-            buffer.peerId(newPeer.peerId);
+            buffer.setPeerId(newPeer.peerId);
             buffer.addElement(newPeer.sessionToken);
 
             packet.buffer = buffer;
 
-            p_peers.push_back(newPeer);
+            p_peers->push_back(newPeer);
             p_peerCount++;
 
             sendMessage(packet);
@@ -93,8 +87,8 @@ private:
         auto receivedBuffer = std::make_shared<boost::array<char, 2048>>();
         auto remoteInfo = std::make_shared<udp::endpoint>();
 
-        p_serverSocket->async_receive_from(
-            boost::asio::buffer(*receivedBuffer),
+        p_serverSocket.async_receive_from(
+            boost::asio::buffer(receivedBuffer->data(), receivedBuffer->size()),
             *remoteInfo,
             [this, receivedBuffer, remoteInfo](const boost::system::error_code &err, size_t bytes) {
                 if (err) {
@@ -111,13 +105,13 @@ private:
 
 public:
     UDPServer(const int &PORT)
-        : p_peerCount(0)
+        : p_serverSocket(p_iocontext), p_peerCount(0)
     {
-        p_serverSocket = std::make_unique<udp::socket>(p_iocontext);
+        p_serverSocket = udp::socket(p_iocontext);
 
-        p_serverSocket->open(udp::v4());
-        p_serverSocket->bind(udp::endpoint(
-            boost::asio::ip::address::from_string("127.0.0.1"),
+        p_serverSocket.open(udp::v4());
+        p_serverSocket.bind(udp::endpoint(
+            boost::asio::ip::make_address("127.0.0.1"),
             PORT)
         );
 
@@ -126,7 +120,7 @@ public:
 
     ~UDPServer() {
         p_iocontext.stop();
-        p_serverSocket->close();
+        p_serverSocket.close();
     };
 
     void start() {
@@ -134,7 +128,7 @@ public:
         p_iocontext.run();
     };
 
-    void sendMessage(Packet packet) {
+    void sendMessage(Packet &packet) {
         if (sizeof(packet.buffer) > 2040) {
             std::cout << "Buffer size limit exceeded!\n";
             return;
@@ -148,7 +142,7 @@ public:
         buffer->insert(buffer->end(), packetBuffer.begin(), packetBuffer.end());
 
         for (int i : packet.peerId) {
-            for (Peer &peer : p_peers) {
+            for (Peer &peer : *p_peers) {
                 if (peer.peerId != i) {
                     continue;
                 };
@@ -158,11 +152,4 @@ public:
             }
         };
     };
-};
-
-int main()
-{
-    UDPServer server(12345);
-    server.start();
-    return 0;
 };

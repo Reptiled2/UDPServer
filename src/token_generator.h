@@ -1,9 +1,7 @@
-#ifndef TOKENGENERATOR_H
-#define TOKENGENERATOR_H
-#include <vector>
-#include <memory>
+#pragma once
+
 #include <random>
-#include "Peer.h"
+#include "udp_server/peer.h"
 
 typedef std::vector<char> char_array;
 
@@ -18,7 +16,7 @@ char_array chars() {
     };
 };
 
-std::string tokenGenerator(const std::vector<Peer>& peers) {
+std::string generateToken(const std::unique_ptr<std::vector<Peer>>& peers) {
     while (true) {
         std::string token;
         token.resize(32);
@@ -34,7 +32,7 @@ std::string tokenGenerator(const std::vector<Peer>& peers) {
         };
 
         bool conflict = false;
-        for (const Peer &peer : peers) {
+        for (const Peer &peer : *peers) {
             if (peer.sessionToken == token) {
                 conflict = true;
                 break;
@@ -46,5 +44,3 @@ std::string tokenGenerator(const std::vector<Peer>& peers) {
         };
     }
 };
-
-#endif
