@@ -1,9 +1,8 @@
-#ifndef PACKET_H
-#define PACKET_H
-#include <array>
-#include "Buffer.h"
+#pragma once
 
-typedef enum PacketTypes {
+#include "buffer.h"
+
+enum PacketTypes {
     CONNECT = 1,
     DISCONNECT = 2,
     MESSAGE = 3,
@@ -12,10 +11,8 @@ typedef enum PacketTypes {
 };
 
 
-typedef struct Packet {
+struct Packet {
     std::vector<int> peerId;
     PacketTypes type;
     BufferVector buffer;
 };
-
-#endif

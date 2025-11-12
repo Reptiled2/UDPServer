@@ -1,20 +1,17 @@
-#ifndef BUFFER_H
-#define BUFFER_H
-#include <vector>
-#include <string>
+#pragma once
 
 class BufferVector {
 private:
 	std::vector<char> buffer;
-	size_t maxSize;
+	size_t maxSize = 2048;
 
 public:
-	BufferVector() : maxSize(2048) {}
+	BufferVector() = default;
 	BufferVector(std::vector<char> &vector) {
 		buffer.insert(buffer.end(), vector.begin(), vector.end());
 	};
 
-	std::vector<char> getBuffer() {
+	const std::vector<char> getBuffer() const {
 		return buffer;
 	};
 
@@ -22,7 +19,7 @@ public:
 		buffer.insert(buffer.end(), vector.begin(), vector.end());
 	}
 
-	void peerId(const int element) {
+	void setPeerId(const int element) {
 		std::string str = std::to_string(element);
 		buffer.push_back(str.size());
 		buffer.push_back('\0');
@@ -36,11 +33,8 @@ public:
 		buffer.push_back('\0');
 	};
 
-	void addElement(std::string element) {
+	void addElement(const std::string& element) {
 		buffer.insert(buffer.end(), element.begin(), element.end());
 		buffer.push_back('\0');
 	};
 };
-
-
-#endif
