@@ -16,7 +16,7 @@ char_array chars() {
     };
 };
 
-std::string tokenGenerator(const std::unique_ptr<std::vector<Peer>>& peers) {
+std::string generateToken(const std::unique_ptr<std::vector<Peer>>& peers) {
     while (true) {
         std::string token;
         token.resize(32);

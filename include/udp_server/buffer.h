@@ -15,10 +15,6 @@ public:
 		return buffer;
 	};
 
-	void addElement(const std::vector<char>& vector) {
-		buffer.insert(buffer.end(), vector.begin(), vector.end());
-	}
-
 	void setPeerId(const int element) {
 		std::string str = std::to_string(element);
 		buffer.push_back(str.size());
@@ -26,6 +22,10 @@ public:
 		buffer.insert(buffer.end(), str.begin(), str.end());
 		buffer.push_back('\0');
 	};
+
+	void addElement(const std::vector<char>& vector) {
+		buffer.insert(buffer.end(), vector.begin(), vector.end());
+	}
 
 	void addElement(const char* element) {
 		size_t length = std::strlen(element);

@@ -48,7 +48,7 @@ private:
             Peer newPeer;
             newPeer.peerId = p_peerCount;
             newPeer.socket = *remoteInfo;
-            newPeer.sessionToken = tokenGenerator(p_peers);
+            newPeer.sessionToken = generateToken(p_peers);
 
             Packet packet;
             packet.type = PacketTypes::CONNECT;
